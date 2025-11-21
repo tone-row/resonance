@@ -54,7 +54,7 @@ export default function RoomPage() {
 
   const socket = usePartySocket({
     host: process.env.NODE_ENV === 'production'
-      ? "resonance-party.robgordon.workers.dev"
+      ? "resonance-party.tone-row.workers.dev"
       : "127.0.0.1:1999",
     room: roomId,
     id: userId!,
