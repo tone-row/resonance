@@ -54,7 +54,6 @@ export default function RoomPage() {
 
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || "127.0.0.1:1999",
-    party: "resonance-server",
     room: roomId,
     id: userId!,
     // Only create socket connection when we have a userId

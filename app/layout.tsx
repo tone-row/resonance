@@ -21,6 +21,8 @@ const fontSerifCustom = Libertinus_Serif_Display({
   variable: "--font-serif-custom",
   subsets: ["latin"],
   weight: ["400"],
+  display: 'swap',
+  fallback: [],
 });
 
 export const metadata: Metadata = {

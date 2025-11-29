@@ -2,16 +2,11 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Run these two commands in separate terminals:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npx next dev        # Terminal 1 - Frontend (http://localhost:3000)
+npx partykit dev    # Terminal 2 - WebSocket Server
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
