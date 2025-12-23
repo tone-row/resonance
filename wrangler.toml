@@ -16,3 +16,6 @@ ENVIRONMENT = "production"
 
 [observability]
 enabled = true
+
+[dev]
+port = 1999

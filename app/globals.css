@@ -149,3 +149,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Highlight animation for new statements */
+@keyframes highlight-fade {
+  0% {
+    background-color: oklch(0.9329 0.1053 95.63); /* yellow-200 */
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.highlight-new {
+  animation: highlight-fade 60s ease-out forwards;
+  border-radius: 2px;
+}

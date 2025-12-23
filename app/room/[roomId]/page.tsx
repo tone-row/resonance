@@ -3,15 +3,12 @@
 import { useParams } from "next/navigation";
 import { useUserId } from "@/hooks/useUserId";
 import { usePartySocket } from "partysocket/react";
-import { useEffect, useState, useMemo } from "react";
-import {
-  type Session,
-  getResolvedStatementsWhereEveryoneAgreed,
-  getLiveStatement,
-} from "@/lib/session";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { type Session, getLiveStatement } from "@/lib/session";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
+import { TypewriterSpan } from "@/components/TypewriterSpan";
 
 export default function RoomPage() {
   const params = useParams();
@@ -29,9 +26,51 @@ export default function RoomPage() {
     return userId in liveStatement.responses;
   }, [liveStatement, userId]);
 
-  const agreedStatements = useMemo(() => {
-    return session ? getResolvedStatementsWhereEveryoneAgreed(session) : [];
+  // Track which statement indices we've already seen (for typewriter effect)
+  const seenStatementsRef = useRef<Set<number>>(new Set());
+
+  // Get ratified statements with their original indices for stable keys
+  const ratifiedStatementsWithIndices = useMemo(() => {
+    if (!session) return [];
+
+    const order = session.ratifiedOrder || [];
+    return order
+      .filter((idx) => idx >= 0 && idx < session.statements.length)
+      .map((originalIndex) => ({
+        originalIndex,
+        statement: session.statements[originalIndex],
+      }))
+      .filter(({ statement }) => {
+        // Verify it's still ratified
+        const responses = Object.values(statement.responses);
+        const presentCount = statement.present.length;
+        const isResolved = responses.length === presentCount;
+        return (
+          isResolved &&
+          responses.length > 0 &&
+          responses.every((r) => r === true)
+        );
+      });
   }, [session]);
+
+  // Determine which statements are new (for typewriter effect)
+  const newStatementIndices = useMemo(() => {
+    const currentIndices = new Set(
+      ratifiedStatementsWithIndices.map((s) => s.originalIndex)
+    );
+    const newOnes = new Set<number>();
+
+    for (const idx of currentIndices) {
+      if (!seenStatementsRef.current.has(idx)) {
+        newOnes.add(idx);
+      }
+    }
+
+    // Update seen set after computing new ones
+    seenStatementsRef.current = currentIndices;
+
+    return newOnes;
+  }, [ratifiedStatementsWithIndices]);
 
   const handleVote = (response: boolean) => {
     if (!socket || !userId || !session || !liveStatement) return;
@@ -107,27 +146,30 @@ export default function RoomPage() {
   }
 
   return (
-    <main className="grid h-dvh grid-rows-[auto_minmax(0,1fr)_300px]">
-      <form onSubmit={handleAddStatement} className="p-4">
-        <div className="flex gap-2">
-          <Input
-            type="text"
-            name="statement"
-            id="statement"
-            data-1p-ignore
-            value={statementText}
-            onChange={(e) => setStatementText(e.target.value)}
-            placeholder="Add a statement to the queue..."
-            autoComplete="off"
-            className="border-neutral-400 bg-neutral-50"
-          />
-          <Button type="submit" disabled={!statementText.trim()}>
-            Add
-          </Button>
-        </div>
-      </form>
+    <main className="grid h-dvh grid-rows-[minmax(0,1fr)_300px] md:grid-rows-none md:grid-cols-2">
+      <div className="relative grid place-items-center">
+        <form
+          onSubmit={handleAddStatement}
+          className="absolute top-0 left-0 right-0 p-4"
+        >
+          <div className="flex gap-2">
+            <Input
+              type="text"
+              name="statement"
+              id="statement"
+              data-1p-ignore
+              value={statementText}
+              onChange={(e) => setStatementText(e.target.value)}
+              placeholder="Add a statement to the queue..."
+              autoComplete="off"
+              className="border-neutral-400 bg-neutral-50"
+            />
+            <Button type="submit" disabled={!statementText.trim()}>
+              Add
+            </Button>
+          </div>
+        </form>
 
-      <div className="grid place-items-center">
         <AnimatePresence mode="wait">
           {liveStatement ? (
             <motion.div
@@ -199,59 +241,37 @@ export default function RoomPage() {
         </AnimatePresence>
       </div>
 
-      {/* <div className="grid border-t border-zinc-200 overflow-y-auto p-4">
-        <div className="space-y-3">
-          {agreedStatements.map((statement, index) => (
-            <div
-              key={`${statement.text}-${index}`}
-              className="p-4 bg-green-100 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-lg"
-            >
-              <p className="text-gray-800 dark:text-gray-200">
-                {statement.text}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div> */}
-
-      <div className="border-t overflow-y p-4 font-serif text-2xl bg-foreground text-background">
-        <AnimatePresence>
-          {agreedStatements.map((statement, index) => {
+      <div className="border-t md:border-t-0 md:border-l overflow-y-auto p-8 font-serif text-xl leading-8 bg-neutral-50 text-neutral-900 dark:text-white">
+        {ratifiedStatementsWithIndices.map(
+          ({ originalIndex, statement }, displayIndex) => {
             const lastChar = statement.text.slice(-1);
             const displayText =
               lastChar === "." || lastChar === "?" || lastChar === "!"
                 ? statement.text
                 : statement.text + ".";
 
+            const isNew = newStatementIndices.has(originalIndex);
+            const suffix =
+              displayIndex < ratifiedStatementsWithIndices.length - 1
+                ? " "
+                : "";
+
             return (
-              <motion.span
-                key={`${statement.text}-${index}`}
-                initial={{
-                  opacity: 0,
-                  filter: "blur(8px)",
-                  y: 10,
-                  scale: 0.98,
-                }}
-                animate={{
-                  opacity: 1,
-                  filter: "blur(0px)",
-                  y: 0,
-                  scale: 1,
-                }}
-                transition={{
-                  duration: 2.5,
-                  ease: [0.23, 1, 0.32, 1],
-                  filter: { duration: 3.0 },
-                  delay: index * 0.1, // Stagger animation for each new statement
-                }}
-                className="inline"
-              >
-                {displayText}
-                {index < agreedStatements.length - 1 && " "}
-              </motion.span>
+              <span key={originalIndex} className="inline">
+                {isNew ? (
+                  <TypewriterSpan
+                    text={displayText}
+                    speed={25}
+                    animate={true}
+                  />
+                ) : (
+                  displayText
+                )}
+                {suffix}
+              </span>
             );
-          })}
-        </AnimatePresence>
+          }
+        )}
       </div>
 
       {/* <div className="text-[10px] text-zinc-500 bg-zinc-50 border border-zinc-200 absolute bottom-1 right-1 p-2 font-mono not-mobile:hidden">

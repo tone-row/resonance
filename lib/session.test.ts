@@ -5,7 +5,8 @@ test('initializeSession creates empty session', () => {
   const session = initializeSession();
   expect(session).toEqual({
     statements: [],
-    liveStatementIndex: null
+    liveStatementIndex: null,
+    ratifiedOrder: []
   });
 });
 

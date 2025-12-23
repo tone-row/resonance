@@ -9,7 +9,10 @@ export const StatementSchema = z.object({
 
 export const SessionSchema = z.object({
   statements: z.array(StatementSchema),
-  liveStatementIndex: z.number().nullable()
+  liveStatementIndex: z.number().nullable(),
+  // Ordered array of statement indices that have been ratified (everyone agreed)
+  // The order is determined semantically by AI to create a coherent narrative
+  ratifiedOrder: z.array(z.number()).default([])
 });
 
 export type Statement = z.infer<typeof StatementSchema>;
@@ -46,7 +49,8 @@ export type SessionAction = AddStatementAction | RespondToStatementAction | Upda
 export function initializeSession(): Session {
   return {
     statements: [],
-    liveStatementIndex: null
+    liveStatementIndex: null,
+    ratifiedOrder: []
   };
 }
 
@@ -61,6 +65,20 @@ export function getUnresolvedStatements(session: Session): Statement[] {
 }
 
 export function getResolvedStatementsWhereEveryoneAgreed(session: Session): Statement[] {
+  // Use the ratifiedOrder if available for semantic ordering
+  if (session.ratifiedOrder && session.ratifiedOrder.length > 0) {
+    return session.ratifiedOrder
+      .filter(index => index >= 0 && index < session.statements.length)
+      .map(index => session.statements[index])
+      .filter(statement => {
+        // Verify it's still a valid ratified statement
+        if (!isStatementResolved(statement)) return false;
+        const responses = Object.values(statement.responses);
+        return responses.length > 0 && responses.every(response => response === true);
+      });
+  }
+
+  // Fallback to chronological order if no ratifiedOrder exists
   return session.statements
     .filter(statement => {
       // Must be resolved
