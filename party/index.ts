@@ -7,6 +7,7 @@ import {
   type Session,
 } from "../lib/session";
 import { insertStatement, applyInsertPosition } from "../lib/insertStatement";
+import { generateNegation } from "../lib/generateNegation";
 
 export class ResonanceServer extends Server {
   options = {
@@ -180,11 +181,19 @@ export class ResonanceServer extends Server {
       presentUsers
     );
 
-    // Add statement with present users
+    // Generate the negation for this statement
+    console.log(`🔄 Generating negation for: "${payload.text}"`);
+    const negation = await generateNegation(payload.text);
+    const negationFirst = Math.random() > 0.5;
+    console.log(`✅ Generated negation: "${negation}" (negationFirst: ${negationFirst})`);
+
+    // Add statement with present users and negation
     const updatedSession = sessionReducer(session, {
       type: "ADD_STATEMENT",
       payload: {
         text: payload.text,
+        negation: negation,
+        negationFirst: negationFirst,
         createdBy: payload.userId,
         presentUsers: presentUsers,
       },

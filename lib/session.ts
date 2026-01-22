@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const StatementSchema = z.object({
   text: z.string(),
+  negation: z.string().optional(),
+  negationFirst: z.boolean().optional(),
   createdBy: z.string(),
   present: z.array(z.string()),
   responses: z.record(z.string(), z.boolean())
@@ -22,6 +24,8 @@ export type AddStatementAction = {
   type: 'ADD_STATEMENT';
   payload: {
     text: string;
+    negation?: string;
+    negationFirst?: boolean;
     createdBy: string;
     presentUsers: string[];
   };
@@ -138,6 +142,8 @@ export function sessionReducer(session: Session, action: SessionAction): Session
           ...session.statements,
           {
             text: action.payload.text,
+            negation: action.payload.negation,
+            negationFirst: action.payload.negationFirst,
             createdBy: action.payload.createdBy,
             present: action.payload.presentUsers,
             responses: {}
