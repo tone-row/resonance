@@ -3,10 +3,12 @@
 import { useParams } from "next/navigation";
 import { useUserId } from "@/hooks/useUserId";
 import { usePartySocket } from "partysocket/react";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { type Session, getLiveStatement } from "@/lib/session";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Mic, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { TypewriterSpan } from "@/components/TypewriterSpan";
 
@@ -16,6 +18,10 @@ export default function RoomPage() {
   const userId = useUserId();
   const [session, setSession] = useState<Session | null>(null);
   const [statementText, setStatementText] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const liveStatement = useMemo(() => {
     return session ? getLiveStatement(session) : null;
@@ -128,18 +134,93 @@ export default function RoomPage() {
     e.preventDefault();
     if (!statementText.trim() || !socket || !userId) return;
 
-    socket.send(
-      JSON.stringify({
-        type: "add_statement",
-        payload: {
-          text: statementText.trim(),
-          userId: userId,
-        },
-      })
-    );
+    const lines = statementText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+
+    for (const line of lines) {
+      socket.send(
+        JSON.stringify({
+          type: "add_statement",
+          payload: {
+            text: line,
+            userId: userId,
+          },
+        })
+      );
+    }
 
     setStatementText("");
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleAddStatement(e as unknown as React.FormEvent);
+    }
+  };
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release the microphone
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+
+        // Convert to base64
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64 = (reader.result as string).split(",")[1];
+
+          setIsProcessing(true);
+          try {
+            const response = await fetch("/api/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ audio: base64 }),
+            });
+
+            if (response.ok) {
+              const { transcription } = await response.json();
+              if (transcription) {
+                setStatementText(transcription);
+              }
+            }
+          } catch {
+            // Silently fail as per user request
+          } finally {
+            setIsProcessing(false);
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch {
+      // Silently fail - user may have denied microphone access
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, []);
 
   if (!userId) {
     return <div>Loading user...</div>;
@@ -152,21 +233,58 @@ export default function RoomPage() {
           onSubmit={handleAddStatement}
           className="absolute top-0 left-0 right-0 p-4"
         >
-          <div className="flex gap-2">
-            <Input
-              type="text"
-              name="statement"
-              id="statement"
-              data-1p-ignore
-              value={statementText}
-              onChange={(e) => setStatementText(e.target.value)}
-              placeholder="Add a statement to the queue..."
-              autoComplete="off"
-              className="border-neutral-400 bg-neutral-50"
-            />
-            <Button type="submit" disabled={!statementText.trim()}>
-              Add
-            </Button>
+          <div className="flex flex-col gap-1">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Textarea
+                  name="statement"
+                  id="statement"
+                  data-1p-ignore
+                  value={statementText}
+                  onChange={(e) => setStatementText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Add a statement to the queue..."
+                  autoComplete="off"
+                  rows={2}
+                  className="border-neutral-400 bg-neutral-50 pr-10 resize-none"
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onMouseDown={!isProcessing ? startRecording : undefined}
+                      onMouseUp={!isProcessing ? stopRecording : undefined}
+                      onMouseLeave={!isProcessing ? stopRecording : undefined}
+                      onTouchStart={!isProcessing ? startRecording : undefined}
+                      onTouchEnd={!isProcessing ? stopRecording : undefined}
+                      disabled={isProcessing}
+                      className={`absolute right-2 top-2 size-7 flex items-center justify-center rounded transition-colors ${
+                        isRecording
+                          ? "bg-red-500 hover:bg-red-600"
+                          : isProcessing
+                          ? "bg-neutral-300 dark:bg-neutral-600 cursor-wait"
+                          : "bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600"
+                      }`}
+                    >
+                      {isProcessing ? (
+                        <Loader2 className="size-4 text-neutral-500 dark:text-neutral-400 animate-spin" />
+                      ) : (
+                        <Mic className={`size-4 ${isRecording ? "text-white" : "text-neutral-600 dark:text-neutral-300"}`} />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {isProcessing ? "Transcribing..." : isRecording ? "Recording..." : "Press and hold to record"}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <Button type="submit" disabled={!statementText.trim()}>
+                Add
+              </Button>
+            </div>
+            <p className="text-xs text-neutral-500">
+              Enter to submit, Shift+Enter for new line. Each line becomes a separate statement.
+            </p>
           </div>
         </form>
 
@@ -198,35 +316,54 @@ export default function RoomPage() {
                 filter: { duration: 1.4 },
                 scale: { duration: 1.0 },
               }}
+              className="px-8 w-full max-w-2xl"
             >
               <motion.p
-                className="text-3xl font-serif text-balance text-gray-800 dark:text-gray-200 mb-4 text-center"
-                initial={{ filter: "blur(12px)" }}
-                animate={{ filter: "blur(0px)" }}
-                transition={{ duration: 1.8, delay: 0.3 }}
+                className="text-sm text-gray-500 dark:text-gray-400 mb-6 text-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
               >
-                {liveStatement.text}
+                Choose the statement you agree with
               </motion.p>
               <motion.div
-                className="flex gap-4 justify-center"
+                className="flex flex-col gap-4"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8, delay: 0.8 }}
+                transition={{ duration: 0.8, delay: 0.3 }}
               >
-                <Button
-                  onClick={() => handleVote(true)}
-                  disabled={hasUserVoted}
-                  variant="green"
-                >
-                  Agree
-                </Button>
-                <Button
-                  onClick={() => handleVote(false)}
-                  disabled={hasUserVoted}
-                  variant="red"
-                >
-                  Disagree
-                </Button>
+                {(() => {
+                  const statementText = liveStatement.text;
+                  const negationText = liveStatement.negation || `Not: ${liveStatement.text}`;
+                  const showNegationFirst = liveStatement.negationFirst ?? false;
+
+                  const firstText = showNegationFirst ? negationText : statementText;
+                  const secondText = showNegationFirst ? statementText : negationText;
+                  const firstVote = showNegationFirst ? false : true;
+                  const secondVote = showNegationFirst ? true : false;
+
+                  const buttonClass = "p-6 text-xl font-serif text-balance text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-left";
+
+                  return (
+                    <>
+                      <button
+                        onClick={() => handleVote(firstVote)}
+                        disabled={hasUserVoted}
+                        className={buttonClass}
+                      >
+                        {firstText}
+                      </button>
+                      <p className="text-center text-gray-400 dark:text-gray-500 text-sm">or</p>
+                      <button
+                        onClick={() => handleVote(secondVote)}
+                        disabled={hasUserVoted}
+                        className={buttonClass}
+                      >
+                        {secondText}
+                      </button>
+                    </>
+                  );
+                })()}
               </motion.div>
             </motion.div>
           ) : (
